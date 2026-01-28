@@ -1,0 +1,20 @@
+{
+	"pages": [
+		{
+			"path": "pages/index/index",
+			"style": {
+				"navigationStyle": "custom",
+				"disableScroll": true,
+				"app-plus": {
+					"scrollIndicator": "none"
+				}
+			}
+		}
+	],
+	"globalStyle": {
+		"navigationBarTextStyle": "white",
+		"navigationBarTitleText": "智能语音斗地主",
+		"navigationBarBackgroundColor": "#1a5e20",
+		"backgroundColor": "#1a5e20"
+	}
+}

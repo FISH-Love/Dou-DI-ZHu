@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>双AI配置测试</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .ai-card {
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            padding: 15px;
+            margin: 10px 0;
+            background: #f9f9f9;
+        }
+        .ai-card h3 {
+            margin: 0 0 10px 0;
+            color: #333;
+        }
+        .status {
+            padding: 5px 10px;
+            border-radius: 4px;
+            font-weight: bold;
+        }
+        .status.success {
+            background: #d4edda;
+            color: #155724;
+        }
+        .status.error {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        .config-item {
+            margin: 5px 0;
+            font-size: 14px;
+        }
+        .test-btn {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 10px 5px;
+        }
+        .test-btn:hover {
+            background: #0056b3;
+        }
+        #results {
+            margin-top: 20px;
+            padding: 15px;
+            background: #e9ecef;
+            border-radius: 4px;
+            white-space: pre-wrap;
+            font-family: monospace;
+            font-size: 12px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🤖 斗地主双AI配置测试</h1>
+        
+        <div class="ai-card">
+            <h3>🔥 Qwen3Plus 激进型AI</h3>
+            <div class="config-item">模型: qwen-plus</div>
+            <div class="config-item">APP-ID: 1a069bb181464b2b9fea2d7e37ba2a40</div>
+            <div class="config-item">性格: 激进型</div>
+            <div class="config-item">温度: 0.8</div>
+            <div id="qwen-status" class="status">检测中...</div>
+        </div>
+        
+        <div class="ai-card">
+            <h3>🧠 DeepSeek 保守型AI</h3>
+            <div class="config-item">模型: deepseek-chat</div>
+            <div class="config-item">APP-ID: 36aa53a96ea549509b459558aa0106eb</div>
+            <div class="config-item">性格: 保守型</div>
+            <div class="config-item">温度: 0.6</div>
+            <div id="deepseek-status" class="status">检测中...</div>
+        </div>
+        
+        <div style="text-align: center; margin: 20px 0;">
+            <button class="test-btn" onclick="testConfiguration()">🔍 测试配置</button>
+            <button class="test-btn" onclick="testAIResponse()">🎮 测试AI响应</button>
+            <button class="test-btn" onclick="clearResults()">🗑️ 清除结果</button>
+        </div>
+        
+        <div id="results"></div>
+    </div>
+
+    <script>
+        // AI配置
+        const AI_CONFIG = {
+            QWEN_PLAYER: {
+                API_URL: '/dashscope/compatible-mode/v1/chat/completions',
+                MODEL: 'qwen-plus',
+                API_KEY: 'sk-55f54cb4e2b348ebaa890db1d6380515',
+                APP_ID: '1a069bb181464b2b9fea2d7e37ba2a40',
+                TEMPERATURE: 0.8,
+                MAX_TOKENS: 800,
+                TIMEOUT: 12000,
+                PERSONALITY: 'aggressive'
+            },
+            DEEPSEEK_PLAYER: {
+                API_URL: '/dashscope/compatible-mode/v1/chat/completions',
+                MODEL: 'deepseek-chat',
+                API_KEY: 'sk-55f54cb4e2b348ebaa890db1d6380515',
+                APP_ID: '36aa53a96ea549509b459558aa0106eb',
+                TEMPERATURE: 0.6,
+                MAX_TOKENS: 800,
+                TIMEOUT: 12000,
+                PERSONALITY: 'conservative'
+            }
+        };
+
+        function log(message) {
+            const results = document.getElementById('results');
+            const timestamp = new Date().toLocaleTimeString();
+            results.textContent += `[${timestamp}] ${message}\n`;
+            results.scrollTop = results.scrollHeight;
+        }
+
+        function updateStatus(aiId, status, message) {
+            const element = document.getElementById(`${aiId}-status`);
+            element.textContent = message;
+            element.className = `status ${status}`;
+        }
+
+        async function testConfiguration() {
+            log('=== 开始测试双AI配置 ===');
+            
+            // 测试Qwen配置
+            const qwenValid = AI_CONFIG.QWEN_PLAYER.API_KEY && AI_CONFIG.QWEN_PLAYER.APP_ID;
+            updateStatus('qwen', qwenValid ? 'success' : 'error', 
+                        qwenValid ? '✅ 配置有效' : '❌ 配置无效');
+            log(`Qwen3Plus配置: ${qwenValid ? '有效' : '无效'}`);
+            
+            // 测试DeepSeek配置
+            const deepseekValid = AI_CONFIG.DEEPSEEK_PLAYER.API_KEY && AI_CONFIG.DEEPSEEK_PLAYER.APP_ID;
+            updateStatus('deepseek', deepseekValid ? 'success' : 'error', 
+                        deepseekValid ? '✅ 配置有效' : '❌ 配置无效');
+            log(`DeepSeek配置: ${deepseekValid ? '有效' : '无效'}`);
+            
+            if (qwenValid && deepseekValid) {
+                log('🎉 双AI配置测试通过！');
+            } else {
+                log('❌ 配置测试失败，请检查API密钥和APP-ID');
+            }
+        }
+
+        async function testAIResponse() {
+            log('=== 开始测试AI响应 ===');
+            
+            const testPrompt = `你是斗地主AI。当前状态：玩家1号，地主，手牌17张，阶段：出牌。
+请返回JSON格式决策：{"action": "play", "cards": [{"value": 3, "suit": "♠"}], "strategy": "测试出牌", "confidence": 0.8}`;
+            
+            // 测试Qwen
+            try {
+                log('测试Qwen3Plus响应...');
+                const qwenResponse = await callAI(AI_CONFIG.QWEN_PLAYER, testPrompt);
+                log(`Qwen3Plus响应: ${qwenResponse.substring(0, 100)}...`);
+                updateStatus('qwen', 'success', '✅ 响应正常');
+            } catch (error) {
+                log(`Qwen3Plus错误: ${error.message}`);
+                updateStatus('qwen', 'error', '❌ 响应失败');
+            }
+            
+            // 测试DeepSeek
+            try {
+                log('测试DeepSeek响应...');
+                const deepseekResponse = await callAI(AI_CONFIG.DEEPSEEK_PLAYER, testPrompt);
+                log(`DeepSeek响应: ${deepseekResponse.substring(0, 100)}...`);
+                updateStatus('deepseek', 'success', '✅ 响应正常');
+            } catch (error) {
+                log(`DeepSeek错误: ${error.message}`);
+                updateStatus('deepseek', 'error', '❌ 响应失败');
+            }
+        }
+
+        async function callAI(config, prompt) {
+            const requestBody = {
+                model: config.MODEL,
+                messages: [
+                    {
+                        role: 'user',
+                        content: prompt
+                    }
+                ],
+                temperature: config.TEMPERATURE,
+                max_tokens: config.MAX_TOKENS
+            };
+
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), config.TIMEOUT);
+
+            try {
+                const response = await fetch(config.API_URL, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${config.API_KEY}`,
+                        'X-DashScope-SSE': 'disable',
+                        'X-DashScope-App-ID': config.APP_ID
+                    },
+                    body: JSON.stringify(requestBody),
+                    signal: controller.signal
+                });
+
+                clearTimeout(timeoutId);
+
+                if (!response.ok) {
+                    const errorData = await response.json().catch(() => ({}));
+                    throw new Error(`API调用失败: ${response.status} ${response.statusText} - ${errorData.message || ''}`);
+                }
+
+                const data = await response.json();
+                
+                if (!data.choices || !data.choices[0]) {
+                    throw new Error('API响应格式错误');
+                }
+
+                return data.choices[0].message.content;
+            } catch (error) {
+                clearTimeout(timeoutId);
+                if (error.name === 'AbortError') {
+                    throw new Error('API调用超时');
+                }
+                throw error;
+            }
+        }
+
+        function clearResults() {
+            document.getElementById('results').textContent = '';
+            log('结果已清除');
+        }
+
+        // 页面加载时自动测试配置
+        window.onload = function() {
+            testConfiguration();
+        };
+    </script>
+</body>
+</html>

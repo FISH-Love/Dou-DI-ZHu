@@ -3,6 +3,8 @@
 
 # 排除前端依赖文件夹
 node_modules/
+# 排除编辑器
+.idea/
 
 # 可选：补充Vue/Vite项目常用排除项（推荐加，避免推送冗余文件）
 .DS_Store

@@ -13,7 +13,7 @@
           class="card vertical"
           :class="{
             'sel': card.selected, 
-            'focus': touchState.focusIndex === i // 新增：手指滑过的高亮态
+            'focus': touchState.focusIndex === i 
           }"
           :style="getCardStyle(i)"
         >
@@ -21,6 +21,7 @@
             <text class="t-rank" :class="isRed(card)?'red':'black'">{{card.label}}</text>
             <text class="t-suit-small" :class="isRed(card)?'red':'black'">{{card.suit}}</text>
           </view>
+          <view v-if="card.selected" class="sel-dot"></view>
         </view>
       </view>
     </view>
@@ -38,10 +39,15 @@
         <text class="status-text">{{ statusText }}</text>
         
         <view class="voice-status-bar" :class="{active: isRecording || voiceState.isListening}">
-            <text v-if="isMyTurn && voiceState.isListening">👂 正在听...</text>
-            <text v-else-if="touchState.isManualVoice">🎤 松手发送</text>
-            <text v-else-if="!isMyTurn">按住屏幕说话</text>
+            <text v-if="isMyTurn && voiceState.isListening">👂 自动聆听中...</text>
+            <text v-else-if="touchState.isManualVoice">🎤 松手发送指令</text>
+            <text v-else>按住屏幕说话</text>
         </view>
+      </view>
+
+      <view v-if="touchState.swipeActionType" class="action-feedback">
+         <text class="action-icon">{{ touchState.swipeActionType === 'right' ? '🚀' : '↩️' }}</text>
+         <text class="action-text">{{ getActionName(touchState.swipeActionType) }}</text>
       </view>
 
       <view class="opponents-area">
@@ -70,7 +76,7 @@
       
       <view v-if="touchState.isManualVoice" class="voice-overlay">
          <text class="mic-icon">🎤</text>
-         <text class="mic-text">正在聆听指令...</text>
+         <text class="mic-text">正在聆听...</text>
       </view>
     </view>
   </view>
@@ -78,7 +84,6 @@
 
 <script setup>
 import { computed, reactive, onMounted, watch } from 'vue';
-import { analyzeCards, canPlay } from '@/utils/cardLogic.js';
 
 const props = defineProps({
   gameData: { type: Object, required: true },
@@ -90,7 +95,7 @@ const props = defineProps({
 
 const emit = defineEmits(['play', 'pass', 'callLandlord', 'passLandlord', 'voiceStart', 'voiceEnd']);
 
-// --- 基础计算 ---
+// --- 数据计算 ---
 const holeCards = computed(() => props.gameData.holeCards);
 const handCards = computed(() => props.gameData.players[0].cards);
 const cardCounts = computed(() => props.gameData.players.map(p => p.cards.length));
@@ -100,23 +105,26 @@ const isRecording = computed(() => props.voiceState.isRecording);
 const isMyTurn = computed(() => (props.gameData.stage === 'calling' || props.gameData.stage === 'playing') && props.gameData.turn === 0);
 
 const statusText = computed(() => {
-  if (props.gameData.stage === 'calling') return '抢地主阶段';
-  if (props.gameData.turn === 0) return '您的回合 (自动听)';
-  return '对手回合 (按住说)';
+  if (props.gameData.stage === 'calling') return '叫地主阶段：右滑叫，左滑不叫';
+  if (props.gameData.turn === 0) return '出牌阶段：右滑出牌，左滑取消';
+  return '对手回合';
 });
 
-// --- 触摸状态 (含防误触逻辑) ---
+const getActionName = (type) => {
+    if (props.gameData.stage === 'calling') {
+        return type === 'right' ? '抢地主' : '不抢';
+    }
+    return type === 'right' ? '确认出牌' : '重置/不出';
+};
+
 const touchState = reactive({
-    startY: 0,
-    startX: 0,
+    startY: 0, startX: 0,
     startTime: 0,
-    
-    // 轴向锁定状态: 'none' | 'vertical'(选牌) | 'horizontal'(动作)
-    axisLock: 'none', 
-    
-    focusIndex: -1, // 当前手指按住的那张牌(高亮但不一定选中)
-    lastFeedbackIndex: -1, // 上一次语音播报的索引(防抖)
-    
+    isTap: true,
+    swipeActionType: null,
+    axisLock: 'none', // 'none', 'horizontal', 'vertical'
+    focusIndex: -1,
+    lastProcessedIndex: -1,
     windowHeight: 0,
     windowWidth: 0,
     isManualVoice: false
@@ -128,183 +136,138 @@ onMounted(() => {
     touchState.windowWidth = sys.windowWidth;
 });
 
-// --- 监听回合变化，控制语音策略 ---
-watch(() => isMyTurn.value, (newVal) => {
-    if (newVal) {
-        // 轮到我：开启自动录音
-        if (!props.voiceState.isListening) {
-            emit('voiceStart'); 
-        }
-    } else {
-        // 没轮到我：关闭自动录音
-        emit('voiceEnd'); 
-    }
-}, { immediate: true });
-
-
-// --- 核心逻辑1：动态布局计算 ---
-const getCardStyle = (index) => {
-    const count = handCards.value.length;
-    // 动态调整卡牌高度：牌少时高一点，牌多时矮一点
-    let cardHeightPx = 80; 
-    if (count < 10) cardHeightPx = 100;
-    if (count > 15) cardHeightPx = 60;
-    
-    const totalH = touchState.windowHeight;
-    const paddingY = 40; 
-    
-    if (count <= 1) return { top: '40%', position: 'absolute', left: '10px' };
-
-    const availableH = totalH - paddingY;
-    const step = (availableH - cardHeightPx) / (count - 1);
-    const top = (paddingY / 2) + step * index;
-
-    return {
-        position: 'absolute',
-        top: `${top}px`,
-        left: '10rpx',
-        height: `${cardHeightPx}px`, // 动态高度
-        zIndex: index
-    };
-};
-
-// --- 核心逻辑2：Y轴映射索引 ---
-const getCardIndexFromTouch = (clientY) => {
-    const count = handCards.value.length;
-    if (count === 0) return -1;
-    const segmentHeight = touchState.windowHeight / count;
-    let index = Math.floor(clientY / segmentHeight);
-    if (index < 0) index = 0;
-    if (index >= count) index = count - 1;
-    return index;
-};
-
-// --- 触摸事件处理 (优化版) ---
+// --- 核心触摸逻辑 ---
 
 const handleGlobalTouchStart = (e) => {
     const touch = e.touches[0];
     touchState.startX = touch.clientX;
     touchState.startY = touch.clientY;
-    touchState.axisLock = 'none'; // 重置锁定
-    touchState.focusIndex = -1;
+    touchState.startTime = Date.now();
+    touchState.isTap = true;
+    touchState.axisLock = 'none';
+    touchState.swipeActionType = null;
+    touchState.lastProcessedIndex = -1;
     touchState.isManualVoice = false;
 
-    // 1. 自己的回合：全屏皆可操作 (除了手动录音)
-    if (isMyTurn.value) {
-        // 初始点击也触发一次选牌定位
-        updateFocusIndex(touch.clientY);
-        return;
-    }
-
-    // 2. 别人的回合：分区操作
-    const leftZone = touchState.windowWidth * 0.25;
-    if (touch.clientX < leftZone) {
-        // 左侧：仅读牌
-        updateFocusIndex(touch.clientY);
+    // 如果不在自己的回合，右侧大面积区域长按作为手动语音触发
+    if (!isMyTurn.value) {
+        const leftZone = touchState.windowWidth * 0.3;
+        if (touch.clientX > leftZone) {
+            touchState.isManualVoice = true;
+            emit('voiceStart');
+            uni.vibrateShort({ type: 'medium' });
+        } else {
+            updateFocusOnly(touch.clientY);
+        }
     } else {
-        // 右侧：按住说话
-        touchState.isManualVoice = true;
-        emit('voiceStart');
-        uni.vibrateShort({ type: 'medium' });
+        // 自己回合，如果是抢地主阶段，触碰任何位置都准备判定滑动
+        // 如果是出牌阶段，触碰左侧才读牌
+        if (props.gameData.stage === 'playing' && touch.clientX < touchState.windowWidth * 0.4) {
+             updateFocusOnly(touch.clientY);
+        }
     }
 };
 
 const handleGlobalTouchMove = (e) => {
     const touch = e.touches[0];
-    
-    // A. 如果是手动录音模式，不处理任何游戏逻辑
     if (touchState.isManualVoice) return;
 
-    // B. 别人的回合：仅处理左侧读牌，无动作
-    if (!isMyTurn.value) {
-        if (touch.clientX < (touchState.windowWidth * 0.25)) {
-            updateFocusIndex(touch.clientY);
-            playCardFeedback(); // 仅播报，不选
+    const deltaX = touch.clientX - touchState.startX;
+    const deltaY = touch.clientY - touchState.startY;
+    const absX = Math.abs(deltaX);
+    const absY = Math.abs(deltaY);
+
+    // 1. 确定意图阶段 (Axis Locking)
+    if (touchState.axisLock === 'none') {
+        if (absX > 15 || absY > 15) {
+            touchState.isTap = false;
+            
+            // 【修复关键】：如果是抢地主阶段，极大优先判定为横向滑动
+            const horizontalBias = props.gameData.stage === 'calling' ? 0.6 : 1.5;
+            
+            if (absX > absY * horizontalBias) {
+                touchState.axisLock = 'horizontal';
+            } else {
+                touchState.axisLock = 'vertical';
+            }
         }
         return;
     }
 
-    // C. 自己的回合：核心防误触逻辑
-    const deltaX = touch.clientX - touchState.startX;
-    const deltaY = touch.clientY - touchState.startY;
-
-    // --- 轴向锁定算法 ---
-    if (touchState.axisLock === 'none') {
-        // 只有移动超过一定距离才开始判断方向
-        if (Math.abs(deltaX) > 10 || Math.abs(deltaY) > 10) {
-            // 如果 Y轴移动 大于 X轴移动的一半 -> 认为是选牌 (垂直操作权重更高，因为手牌是垂直的)
-            if (Math.abs(deltaY) > Math.abs(deltaX) * 0.8) {
-                touchState.axisLock = 'vertical';
-            } else {
-                touchState.axisLock = 'horizontal';
-            }
+    // 2. 执行意图阶段
+    if (touchState.axisLock === 'horizontal') {
+        const THRESHOLD = 60; // 滑动判定阈值
+        if (deltaX > THRESHOLD) {
+            touchState.swipeActionType = 'right';
+        } else if (deltaX < -THRESHOLD) {
+            touchState.swipeActionType = 'left';
+        } else {
+            touchState.swipeActionType = null;
         }
-    }
-
-    // --- 根据锁定状态执行逻辑 ---
-    
-    // 1. 垂直锁定：专心选牌/读牌
-    if (touchState.axisLock === 'vertical') {
-        updateFocusIndex(touch.clientY);
-        playCardFeedback();
-    } 
-    // 2. 水平锁定：专心处理出牌动作
-    else if (touchState.axisLock === 'horizontal') {
-        // 触发阈值
-        const ACTION_THRESHOLD = 80;
-        
-        // 向右滑 -> 出牌 (Positive)
-        if (deltaX > ACTION_THRESHOLD) {
-            triggerAction('play');
-            // 重置一下避免重复触发，或者等待touchend
-            touchState.axisLock = 'triggered'; 
-        }
-        // 向左滑 -> 取消/不出 (Negative)
-        else if (deltaX < -ACTION_THRESHOLD) {
-            triggerAction('pass');
-            touchState.axisLock = 'triggered';
-        }
+        touchState.focusIndex = -1; // 横滑时取消手牌高亮
+    } else if (touchState.axisLock === 'vertical') {
+        // 只有出牌阶段或者非己方回合读牌时，才处理垂直选牌
+        handleTouchRead(touch.clientY);
     }
 };
 
 const handleGlobalTouchEnd = (e) => {
-    // 结束手动录音
     if (touchState.isManualVoice) {
         emit('voiceEnd');
         touchState.isManualVoice = false;
         return;
     }
 
-    // 结束选牌：确认选择
-    if (isMyTurn.value && touchState.axisLock === 'vertical' && touchState.focusIndex !== -1) {
-        toggleSelection(touchState.focusIndex);
-    }
-    
-    // 如果是轻触(没有明显移动)，视为点击选牌
-    if (isMyTurn.value && touchState.axisLock === 'none') {
-        // 需要重新计算一下最后的落点索引
-        const touch = e.changedTouches[0];
-        const idx = getCardIndexFromTouch(touch.clientY);
-        toggleSelection(idx);
+    if (!isMyTurn.value) {
+        resetTouch();
+        return;
     }
 
-    touchState.focusIndex = -1;
-    touchState.lastFeedbackIndex = -1;
-    touchState.axisLock = 'none';
+    // 处理结果
+    if (touchState.isTap) {
+        // 点击逻辑：仅在出牌阶段有效
+        if (props.gameData.stage === 'playing') {
+            const touch = e.changedTouches[0];
+            const idx = getCardIndexFromTouch(touch.clientY);
+            toggleSelection(idx);
+        }
+    } else if (touchState.swipeActionType) {
+        // 滑动逻辑：抢地主和出牌阶段通用
+        triggerAction(touchState.swipeActionType);
+    }
+
+    resetTouch();
 };
 
-// --- 辅助逻辑 ---
+const resetTouch = () => {
+    setTimeout(() => {
+        touchState.focusIndex = -1;
+        touchState.lastProcessedIndex = -1;
+        touchState.swipeActionType = null;
+        touchState.axisLock = 'none';
+    }, 50);
+};
 
-const updateFocusIndex = (y) => {
-    const idx = getCardIndexFromTouch(y);
+// --- 功能辅助函数 ---
+
+const getCardIndexFromTouch = (clientY) => {
+    const count = handCards.value.length;
+    if (count === 0) return -1;
+    // 盲人模式建议将垂直空间均分给手牌数量
+    const segmentHeight = touchState.windowHeight / count;
+    let index = Math.floor(clientY / segmentHeight);
+    return Math.max(0, Math.min(count - 1, index));
+};
+
+const updateFocusOnly = (clientY) => {
+    touchState.focusIndex = getCardIndexFromTouch(clientY);
+};
+
+const handleTouchRead = (clientY) => {
+    const idx = getCardIndexFromTouch(clientY);
     touchState.focusIndex = idx;
-};
-
-// 语音播报防抖 (手指在同一张牌上滑动时不重复播报)
-const playCardFeedback = () => {
-    const idx = touchState.focusIndex;
-    if (idx !== -1 && idx !== touchState.lastFeedbackIndex) {
-        touchState.lastFeedbackIndex = idx;
+    if (idx !== -1 && idx !== touchState.lastProcessedIndex) {
+        touchState.lastProcessedIndex = idx;
         const card = handCards.value[idx];
         if (card) {
             uni.vibrateShort({ type: 'light' });
@@ -313,51 +276,55 @@ const playCardFeedback = () => {
     }
 };
 
-// 切换选中状态
 const toggleSelection = (idx) => {
-    if (idx < 0 || idx >= handCards.value.length) return;
+    if (idx === -1) return;
     const card = handCards.value[idx];
-    card.selected = !card.selected;
-    
-    const prefix = card.selected ? '选 ' : '退 ';
-    props.speak(prefix + props.getCardName(card));
-    
-    // 简单的出牌提示
-    checkPlayable();
+    if (card) {
+        card.selected = !card.selected;
+        uni.vibrateShort({ type: 'light' });
+        props.speak((card.selected ? '选' : '退') + props.getCardName(card));
+    }
 };
 
 const triggerAction = (type) => {
-    uni.vibrateShort({ type: 'heavy' });
-    if (type === 'play') {
-        const hasSelection = handCards.value.some(c => c.selected);
-        if (hasSelection) {
-            emit('play', handCards.value.filter(c => c.selected));
+    uni.vibrateShort({ type: 'heavy' }); 
+    if (props.gameData.stage === 'calling') {
+        type === 'right' ? emit('callLandlord') : emit('passLandlord');
+    } else {
+        if (type === 'right') {
+            const selectedCards = handCards.value.filter(c => c.selected);
+            if (selectedCards.length > 0) emit('play', selectedCards);
+            else props.speak("请先点选要出的牌");
         } else {
-            // 如果向右滑但没选牌，且是叫地主阶段 -> 抢地主
-            if (props.gameData.stage === 'calling') emit('callLandlord');
-            else props.speak("请先选牌");
-        }
-    } else if (type === 'pass') {
-        const hasSelection = handCards.value.some(c => c.selected);
-        if (hasSelection) {
-            handCards.value.forEach(c => c.selected = false);
-            props.speak("已取消");
-        } else {
-            // 如果没选牌且向左滑 -> 不出/不抢
-             if (props.gameData.stage === 'calling') emit('passLandlord');
-             else {
-                 if (!isMustPlay.value) emit('pass');
-                 else props.speak("必须出牌");
-             }
+            const hasSelection = handCards.value.some(c => c.selected);
+            if (hasSelection) {
+                handCards.value.forEach(c => c.selected = false);
+                props.speak("已重置选择");
+            } else if (!isMustPlay.value) {
+                emit('pass');
+            } else {
+                props.speak("本轮你必须出牌");
+            }
         }
     }
 };
 
-const checkPlayable = () => {
-    const sel = handCards.value.filter(c => c.selected);
-    if (sel.length === 0) return;
-    const playType = analyzeCards(sel);
-    // 这里可以加逻辑：如果选中了合法的牌，发出轻微提示音
+// --- 布局样式算法 ---
+const getCardStyle = (index) => {
+    const count = handCards.value.length;
+    const availableH = touchState.windowHeight - 40;
+    let cardHeight = Math.min(120, availableH / count + 15);
+    const step = count <= 1 ? 0 : (availableH - cardHeight) / (count - 1);
+    const top = 20 + step * index;
+
+    return {
+        position: 'absolute',
+        top: `${top}px`,
+        left: '10rpx',
+        width: '90%',
+        height: `${cardHeight}px`,
+        zIndex: index
+    };
 };
 </script>
 
@@ -369,7 +336,7 @@ const checkPlayable = () => {
 
 /* 左侧手牌区 */
 .left-hand-panel {
-    width: 20vw; height: 100vh;
+    width: 25vw; height: 100vh;
     background: rgba(0,0,0,0.4); 
     border-right: 2rpx solid rgba(255,255,255,0.15);
     position: relative; z-index: 10;
@@ -378,31 +345,30 @@ const checkPlayable = () => {
 
 /* 垂直卡牌 */
 .card.vertical {
-    width: 95%; height: 80px; /* 高度会被JS覆盖 */
-    background: #fdfdfd; border-radius: 8rpx;
+    background: #fdfdfd; 
+    border-radius: 8rpx;
     box-shadow: 0 2rpx 4rpx rgba(0,0,0,0.5);
-    transition: transform 0.1s, background-color 0.1s;
+    transition: transform 0.1s;
     display: flex; justify-content: flex-start; padding: 6rpx;
-    border-left: 6rpx solid #ccc; /* 增加左侧粗边框方便触摸识别 */
+    border-left: 8rpx solid #bdbdbd; 
 }
-/* 选中状态 */
 .card.vertical.sel {
     background: #fff9c4; border-left-color: #fbc02d;
-    transform: translateX(20rpx); /* 向右凸起 */
-    z-index: 1000 !important;
+    transform: translateX(20rpx); z-index: 1000 !important;
 }
-/* 触摸高亮态 (Focus) */
-.card.vertical.focus {
-    background: #e0e0e0;
+.card.vertical.focus { background: #e0e0e0; }
+.sel-dot {
+    width: 16rpx; height: 16rpx; background: #f44336;
+    border-radius: 50%; position: absolute; right: 10rpx; top: 50%; transform: translateY(-50%);
 }
 
-.card-corner { display: flex; flex-direction: column; align-items: center; width: 40rpx;}
-.t-rank { font-size: 36rpx; font-weight: 900; line-height: 1; color: #333; }
-.t-suit-small { font-size: 24rpx; margin-top: 4rpx; }
+.card-corner { display: flex; flex-direction: column; align-items: center; width: 44rpx;}
+.t-rank { font-size: 38rpx; font-weight: 900; line-height: 1; color: #333; }
+.t-suit-small { font-size: 26rpx; margin-top: 4rpx; }
 .red { color: #d32f2f; } .black { color: #212121; }
 
 /* 右侧桌面 */
-.right-table-panel { width: 80vw; height: 100vh; display: flex; flex-direction: column; position: relative; }
+.right-table-panel { flex: 1; height: 100vh; display: flex; flex-direction: column; position: relative; }
 
 .top-info { height: 15%; display: flex; flex-direction: column; align-items: center; justify-content: center; position: relative; }
 .hole-cards { display: flex; gap: 8rpx; }
@@ -410,11 +376,11 @@ const checkPlayable = () => {
 .back { width: 100%; height: 100%; background: #3f51b5; }
 .status-text { font-size: 24rpx; opacity: 0.6; margin-top: 8rpx; }
 
-/* 语音状态条 */
 .voice-status-bar {
     position: absolute; top: 10rpx; right: 10rpx;
     background: rgba(0,0,0,0.3); padding: 4rpx 12rpx; border-radius: 20rpx;
     font-size: 20rpx; opacity: 0.7; transition: all 0.3s;
+    display: flex; align-items: center; gap: 4rpx;
 }
 .voice-status-bar.active { background: #4caf50; opacity: 1; }
 
@@ -426,11 +392,21 @@ const checkPlayable = () => {
 .head { width: 70rpx; height: 70rpx; border-radius: 50%; background: #ddd; }
 .badge { position: absolute; top: 0; right: 0; background: #ff9800; font-size: 18rpx; padding: 2rpx 4rpx; }
 .count { font-size: 22rpx; background: rgba(0,0,0,0.6); padding: 2rpx 10rpx; border-radius: 10rpx; margin-top: 4rpx; }
+.bubble { position: absolute; left: -80rpx; top: 20rpx; background: rgba(0,0,0,0.8); font-size: 24rpx; padding: 6rpx 12rpx; border-radius: 8rpx;}
 
 .desk-display { height: 25%; display: flex; justify-content: center; align-items: center; }
 .card.medium { width: 80rpx; height: 110rpx; background: white; border-radius: 8rpx; display: flex; justify-content: center; align-items: center; font-size: 38rpx; font-weight: bold; margin-left: -30rpx; box-shadow: 0 2rpx 8rpx rgba(0,0,0,0.3); }
 
-/* 全屏语音遮罩 */
+/* 滑动动作反馈遮罩 */
+.action-feedback {
+    position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    background: rgba(0,0,0,0.7); padding: 30rpx 50rpx; border-radius: 20rpx;
+    display: flex; flex-direction: column; align-items: center; pointer-events: none; z-index: 1500;
+}
+.action-icon { font-size: 80rpx; margin-bottom: 10rpx; }
+.action-text { font-size: 32rpx; font-weight: bold; }
+
+/* 语音遮罩 */
 .voice-overlay {
     position: absolute; top: 0; left: 0; right: 0; bottom: 0;
     background: rgba(0,0,0,0.7); display: flex; flex-direction: column; justify-content: center; align-items: center; z-index: 2000;
